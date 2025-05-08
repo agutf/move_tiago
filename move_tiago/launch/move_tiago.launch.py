@@ -1,30 +1,15 @@
-# Copyright (c) 2022 PAL Robotics S.L. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 import os
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch_pal.arg_utils import read_launch_argument
-from launch_ros.actions import Node
 from tiago_description.tiago_launch_utils import get_tiago_hw_suffix
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch_ros.actions import Node
 from moveit_configs_utils import MoveItConfigsBuilder
-from launch_pal.arg_utils import LaunchArgumentsBase
 from tiago_description.launch_arguments import TiagoArgs
-from launch.substitutions import LaunchConfiguration
+from launch_pal.arg_utils import LaunchArgumentsBase
 from dataclasses import dataclass
 from launch_pal.robot_arguments import CommonArgs
-from ament_index_python.packages import get_package_share_directory
 
 
 @dataclass(frozen=True)
@@ -58,17 +43,16 @@ def declare_actions(
     launch_description: LaunchDescription, launch_args: LaunchArguments
 ):
 
-    launch_description.add_action(OpaqueFunction(function=start_move_group))
+    launch_description.add_action(OpaqueFunction(function=start_move_tiago))
     return
 
 
-def start_move_group(context, *args, **kwargs):
+def start_move_tiago(context, *args, **kwargs):
 
-    base_type = read_launch_argument("base_type", context),
+    base_type = read_launch_argument("base_type", context)
     arm_type = read_launch_argument("arm_type", context)
     end_effector = read_launch_argument("end_effector", context)
     ft_sensor = read_launch_argument("ft_sensor", context)
-    use_sensor_manager = read_launch_argument("use_sensor_manager", context)
 
     hw_suffix = get_tiago_hw_suffix(
         arm=arm_type,
@@ -115,34 +99,20 @@ def start_move_group(context, *args, **kwargs):
             pipelines=["ompl", "chomp"], default_planning_pipeline="ompl"
         )
         .pilz_cartesian_limits(file_path=pilz_cartesian_limits)
+        .to_moveit_configs()
     )
-
-    if use_sensor_manager:
-        # moveit_sensors path
-        moveit_sensors_path = "config/sensors_3d.yaml"
-        moveit_config.sensors_3d(moveit_sensors_path)
-
-    moveit_config.to_moveit_configs()
-
-    move_group_configuration = {
-        "use_sim_time": True,
-        "publish_robot_description_semantic": True,
-        "robot_description_timeout": 60.0,
-    }
-
-    move_group_params = [
-        moveit_config.to_dict(),
-        move_group_configuration,
-    ]
-
-    # Start the actual move_group node/action server
+    
     move_group = Node(
         name="move_tiago",
         package="move_tiago",
         executable="move_tiago_server",
-        output="screen",
-        arguments=['--ros-args', '--log-level', 'info'],
-        parameters=move_group_params,
+        output='both',
+        emulate_tty=True,
+        parameters=[{'use_sim_time': True},
+                    moveit_config.robot_description,
+            moveit_config.robot_description_semantic,
+            moveit_config.planning_pipelines,
+            moveit_config.robot_description_kinematics,],
     )
 
     return [move_group]

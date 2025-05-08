@@ -1,122 +1,68 @@
-// #include "move_tiago_msgs/srv/move_tiago.hpp"
-// #include "rclcpp/rclcpp.hpp"
-
-// #include <moveit/move_group_interface/move_group_interface.h>
-// #include <moveit/planning_scene_interface/planning_scene_interface.h>
-
-// #include <geometry_msgs/msg/pose_stamped.hpp>
-
-// #include <memory>
-
-// class MoveTiagoServerNode : public rclcpp::Node {
-// public:
-//   MoveTiagoServerNode(rclcpp::NodeOptions options) : Node("move_tiago_server", options) {
-//     srv_ = create_service<move_tiago_msgs::srv::MoveTiago>(
-//         "move_tiago", std::bind(&MoveTiagoServerNode::move, this,
-//                                 std::placeholders::_1, std::placeholders::_2));
-//   }
-
-//   ~MoveTiagoServerNode() { delete move_group; }
-
-//   void setMoveGroup(moveit::planning_interface::MoveGroupInterface *m) {
-//     this->move_group = m;
-//   }
-
-// private:
-//   rclcpp::Service<move_tiago_msgs::srv::MoveTiago>::SharedPtr srv_;
-//   moveit::planning_interface::MoveGroupInterface *move_group;
-
-//   void move(const std::shared_ptr<move_tiago_msgs::srv::MoveTiago::Request> request,
-//             const std::shared_ptr<move_tiago_msgs::srv::MoveTiago::Response> response) {
-
-//     RCLCPP_INFO(this->get_logger(), "Requested move_tiago Service");
-
-//     geometry_msgs::msg::PoseStamped randomPose = move_group->getRandomPose();
-
-//     RCLCPP_INFO(this->get_logger(), "Ramdom pose obtained");
-
-//     move_group->setPoseTarget(randomPose);
-
-//     move_group->move();
-
-//     response->success = true;
-//   }
-// };
-
-// int main(int argc, char **argv) {
-
-//   rclcpp::init(argc, argv);
-
-//   rclcpp::NodeOptions node_options;
-//   node_options.automatically_declare_parameters_from_overrides(true);
-
-//   auto move_tiago_server_node = std::make_shared<MoveTiagoServerNode>(node_options);
-
-//   const std::string PLANNING_GROUP = "arm";
-  
-//   auto move_group = new moveit::planning_interface::MoveGroupInterface(
-//       move_tiago_server_node, PLANNING_GROUP);
-
-//   move_group->setMaxVelocityScalingFactor(1.0);
-//   move_group->setMaxAccelerationScalingFactor(1.0);
-
-//   move_tiago_server_node->setMoveGroup(move_group);
-
-//   rclcpp::executors::MultiThreadedExecutor executor;
-//   executor.add_node(move_tiago_server_node);
-//   std::thread spinner = std::thread([&executor]() { executor.spin(); });
-
-//   spinner.join();
-
-//   rclcpp::shutdown();
-
-//   return 0;
-// }
-
-#include <memory>
-
 #include <rclcpp/rclcpp.hpp>
+#include "move_tiago_msgs/srv/move_tiago.hpp"
 #include <moveit/move_group_interface/move_group_interface.h>
+#include <iostream>
 
-int main(int argc, char * argv[])
-{
-  // Initialize ROS and create the Node
-  rclcpp::init(argc, argv);
-  auto const node = std::make_shared<rclcpp::Node>(
-    "hello_moveit",
-    rclcpp::NodeOptions().automatically_declare_parameters_from_overrides(true)
-  );
+// Combined MoveTiagoServer class, which includes service and pose printing functionality
+class MoveTiagoServer : public rclcpp::Node {
+public:
+  // Constructor to initialize the node, MoveGroupInterface, and executor
+  MoveTiagoServer(const rclcpp::NodeOptions &options)
+  : rclcpp::Node("robot_control", options), // Initialize the node with the name "robot_control"
+    node_(std::make_shared<rclcpp::Node>("move_group_interface")), // Create an additional ROS node
+    move_group_interface_(node_, "arm"), // Initialize MoveGroupInterface for controlling the arm
+    executor_(std::make_shared<rclcpp::executors::SingleThreadedExecutor>()) // Create a single-threaded executor
+  {
+    // Create the service for printing the current pose
+    service_ = this->create_service<move_tiago_msgs::srv::MoveTiago>(
+              "move_tiago", std::bind(&MoveTiagoServer::move, this,
+                                      std::placeholders::_1, std::placeholders::_2));
 
-  // Create a ROS logger
-  auto const logger = rclcpp::get_logger("hello_moveit");
+    // Add the node to the executor and start the executor thread
+    executor_->add_node(node_);
+    executor_thread_ = std::thread([this]() {
+      RCLCPP_INFO(node_->get_logger(), "Starting executor thread"); // Log message indicating the thread start
+      executor_->spin(); // Run the executor to process callbacks
+    });
+  }
 
-  // Create the MoveIt MoveGroup Interface
-using moveit::planning_interface::MoveGroupInterface;
-auto move_group_interface = MoveGroupInterface(node, "arm");
+private:
+  void move(const std::shared_ptr<move_tiago_msgs::srv::MoveTiago::Request> request,
+    const std::shared_ptr<move_tiago_msgs::srv::MoveTiago::Response> response) {
 
-auto random_pose = move_group_interface.getRandomPose();
+  RCLCPP_INFO(this->get_logger(), "Requested move_tiago Service");
 
-RCLCPP_INFO(logger, "Valor de X en la POSE RANDOM: %f", random_pose.pose.position.x);
-RCLCPP_INFO(logger, "Valor de Y en la POSE RANDOM: %f", random_pose.pose.position.y);
-RCLCPP_INFO(logger, "Valor de Z en la POSE RANDOM: %f", random_pose.pose.position.z);
+  geometry_msgs::msg::PoseStamped randomPose = move_group_interface_.getRandomPose();
 
-move_group_interface.setPoseTarget(random_pose);
+  RCLCPP_INFO(this->get_logger(), "Ramdom pose obtained");
 
-// Create a plan to that target pose
-auto const [success, plan] = [&move_group_interface]{
-  moveit::planning_interface::MoveGroupInterface::Plan msg;
-  auto const ok = static_cast<bool>(move_group_interface.plan(msg));
-  return std::make_pair(ok, msg);
-}();
+  move_group_interface_.setPoseTarget(randomPose);
 
-// Execute the plan
-if(success) {
-  move_group_interface.execute(plan);
-} else {
-  RCLCPP_ERROR(logger, "Planing failed!");
-}
+  move_group_interface_.move();
 
-  // Shutdown ROS
-  rclcpp::shutdown();
-  return 0;
+  response->success = true;
+  }
+
+  // Member variables
+  rclcpp::Node::SharedPtr node_; // Additional ROS node pointer
+  moveit::planning_interface::MoveGroupInterface move_group_interface_;  // MoveIt interface for controlling the arm
+  rclcpp::Service<move_tiago_msgs::srv::MoveTiago>::SharedPtr service_;  // Service pointer for pose requests
+  std::shared_ptr<rclcpp::executors::SingleThreadedExecutor> executor_;  // Single-threaded executor
+  std::thread executor_thread_;  // Thread to run the executor
+};
+
+// Main function - Entry point of the program
+int main(int argc, char** argv) {
+  rclcpp::init(argc, argv); // Initialize ROS 2
+
+  rclcpp::NodeOptions node_options;
+  node_options.automatically_declare_parameters_from_overrides(true); // Allow automatic parameter declaration
+  node_options.use_intra_process_comms(false); // Disable intra-process communication
+
+  auto node = std::make_shared<MoveTiagoServer>(node_options); // Create the MoveTiagoServer object and start the node
+
+  rclcpp::spin(node); // Spin the main thread to process callbacks
+
+  rclcpp::shutdown(); // Shutdown the ROS 2 system
+  return 0; // Exit the program
 }
